@@ -1,15 +1,16 @@
 from contextlib import asynccontextmanager
+import json
 from uuid import uuid4
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from .auth import admin_user, create_token, current_user, hash_password, verify_password
 from .config import settings
 from .database import Base, SessionLocal, engine, get_db
-from .flight_provider import FlightProviderError, provider_status, search_flights
+from .flight_provider import FlightProviderError, create_test_order, provider_status, search_flights
 from .db_models import Agency, Booking, Customer, Invoice, Payment, PortalRequest, Supplier, User, VisaCase
-from .schemas import AccountIn, BookingIn, CustomerIn, FlightSearchIn, InvoiceIn, LoginIn, PaymentIn, PortalRequestIn, PortalRequestStatusIn, SettingsIn, SupplierIn, UserIn, VisaIn
+from .schemas import AccountIn, BookingIn, CustomerIn, FlightOrderIn, FlightSearchIn, InvoiceIn, LoginIn, PaymentIn, PortalRequestIn, PortalRequestStatusIn, SettingsIn, SupplierIn, UserIn, VisaIn
 
 
 def uid(prefix: str) -> str:
@@ -23,7 +24,16 @@ def visa_json(x): return {"id":x.id,"customerId":x.customer_id,"country":x.count
 def supplier_json(x): return {"id":x.id,"name":x.name,"type":x.type,"phone":x.phone,"email":x.email,"contactPerson":x.contact_person,"notes":x.notes}
 def user_json(x): return {"id":x.id,"name":x.name,"email":x.email,"role":x.role,"active":x.active}
 def agency_json(x): return {"id":x.id,"name":x.name,"currency":x.currency,"phone":x.phone,"address":x.address}
-def portal_request_json(x): return {"id":x.id,"offerId":x.offer_id,"airline":x.airline,"flightNumber":x.flight_number,"origin":x.origin,"destination":x.destination,"travelDate":x.travel_date,"passengerName":x.passenger_name,"phone":x.phone,"email":x.email,"adults":x.adults,"amount":x.amount,"currency":x.currency,"status":x.status,"createdAt":x.created_at.isoformat() if x.created_at else ""}
+def portal_request_json(x): return {
+    "id":x.id,"offerId":x.offer_id,"airline":x.airline,"flightNumber":x.flight_number,
+    "origin":x.origin,"destination":x.destination,"travelDate":x.travel_date,
+    "passengerName":x.passenger_name,"phone":x.phone,"email":x.email,"adults":x.adults,
+    "amount":x.amount,"currency":x.currency,"status":x.status,
+    "provider":x.provider,"providerOrderId":x.provider_order_id,
+    "bookingReference":x.booking_reference,"bookingId":x.booking_id or "",
+    "paymentStatus":x.payment_status,
+    "createdAt":x.created_at.isoformat() if x.created_at else ""
+}
 
 def seed_database():
     Base.metadata.create_all(engine)
@@ -86,6 +96,89 @@ def public_flight_search(data: FlightSearchIn):
         return search_flights(origin, destination, data.travelDate.strip(), adults)
     except FlightProviderError as exc:
         raise HTTPException(502, str(exc))
+
+@app.post("/public/flights/test-orders")
+def public_flight_test_order(data: FlightOrderIn, request: Request, db: Session = Depends(get_db)):
+    if provider_status()["mode"] != "test":
+        raise HTTPException(403, "Test booking is available only while Duffel Test Mode is active")
+    if not data.offerId.strip():
+        raise HTTPException(400, "Offer ID is required")
+    if not data.passengers or len(data.passengers) > 9:
+        raise HTTPException(400, "Provide between 1 and 9 passengers")
+
+    allowed_titles={"mr","mrs","ms","miss","dr"}
+    allowed_genders={"m","f"}
+    passengers=[]
+    for p in data.passengers:
+        if p.title not in allowed_titles or p.gender not in allowed_genders:
+            raise HTTPException(400, "Passenger title or gender is invalid")
+        if len(p.givenName.strip())<1 or len(p.familyName.strip())<1:
+            raise HTTPException(400, "Every passenger needs a given name and family name")
+        if "@" not in p.email or "." not in p.email.split("@")[-1]:
+            raise HTTPException(400, "Every passenger needs a valid email address")
+        if len(p.phoneNumber.strip())<7:
+            raise HTTPException(400, "Every passenger needs a valid phone number")
+        if len(p.bornOn.strip())!=10:
+            raise HTTPException(400, "Every passenger needs a date of birth in YYYY-MM-DD format")
+        passengers.append({
+            "title":p.title,"gender":p.gender,
+            "given_name":p.givenName.strip(),"family_name":p.familyName.strip(),
+            "born_on":p.bornOn.strip(),"email":p.email.strip().lower(),
+            "phone_number":p.phoneNumber.strip()
+        })
+
+    forwarded=(request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    device_ip=forwarded or (request.client.host if request.client else "")
+    user_agent=request.headers.get("user-agent") or ""
+    try:
+        result=create_test_order(data.offerId.strip(),passengers,device_ip=device_ip,user_agent=user_agent)
+    except FlightProviderError as exc:
+        raise HTTPException(502, str(exc))
+
+    agency=db.scalar(select(Agency).limit(1))
+    if not agency:
+        raise HTTPException(503,"Agency is not configured")
+
+    offer=result["offer"]; order=result["order"]; lead=data.passengers[0]
+    lead_email=lead.email.strip().lower(); lead_phone=lead.phoneNumber.strip()
+    lead_name=f"{lead.givenName.strip()} {lead.familyName.strip()}".strip()
+
+    customer=None
+    if lead_email:
+        customer=db.scalar(select(Customer).where(Customer.agency_id==agency.id,Customer.email==lead_email).limit(1))
+    if not customer and lead_phone:
+        customer=db.scalar(select(Customer).where(Customer.agency_id==agency.id,Customer.phone==lead_phone).limit(1))
+    if not customer:
+        customer=Customer(
+            id=uid("c"),agency_id=agency.id,name=lead_name,phone=lead_phone,email=lead_email,
+            nationality="",passport_number="",passport_expiry="",notes="Created from Duffel test booking"
+        )
+        db.add(customer);db.flush()
+
+    payment_status="Awaiting payment" if order["awaitingPayment"] else "Paid with Duffel test balance"
+    portal=PortalRequest(
+        id=uid("req"),agency_id=agency.id,offer_id=data.offerId.strip(),
+        airline=offer["airline"],flight_number=offer["flightNumber"],
+        origin=offer["origin"],destination=offer["destination"],travel_date=offer["travelDate"],
+        passenger_name=lead_name,phone=lead_phone,email=lead_email,adults=len(data.passengers),
+        amount=order["totalAmount"],currency=order["totalCurrency"],status="Confirmed",
+        provider="Duffel",provider_order_id=order["id"],booking_reference=order["bookingReference"],
+        booking_id=None,payment_status=payment_status,
+        passenger_data=json.dumps([{
+            "title":p.title,"gender":p.gender,"givenName":p.givenName.strip(),
+            "familyName":p.familyName.strip(),"bornOn":p.bornOn.strip(),
+            "email":p.email.strip().lower(),"phoneNumber":p.phoneNumber.strip()
+        } for p in data.passengers])
+    )
+    db.add(portal);db.commit();db.refresh(portal)
+    return {
+        "ok":True,"testMode":True,"requestNumber":portal.id,
+        "orderId":order["id"],"bookingReference":order["bookingReference"],
+        "amount":order["totalAmount"],"currency":order["totalCurrency"],
+        "airline":offer["airline"],"route":f"{offer['origin']} → {offer['destination']}",
+        "status":"Confirmed","paymentStatus":payment_status,
+        "message":"Duffel test order created successfully. No live money moved."
+    }
 
 @app.post("/public/booking-requests")
 def public_booking_request(data: PortalRequestIn, db: Session = Depends(get_db)):
