@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 from .auth import admin_user, create_token, current_user, hash_password, verify_password
 from .config import settings
 from .database import Base, SessionLocal, engine, get_db
-from .db_models import Agency, Booking, Customer, Payment, Supplier, User, VisaCase
-from .schemas import AccountIn, BookingIn, CustomerIn, LoginIn, PaymentIn, SettingsIn, SupplierIn, UserIn, VisaIn
+from .db_models import Agency, Booking, Customer, Invoice, Payment, Supplier, User, VisaCase
+from .schemas import AccountIn, BookingIn, CustomerIn, InvoiceIn, LoginIn, PaymentIn, SettingsIn, SupplierIn, UserIn, VisaIn
 
 
 def uid(prefix: str) -> str:
@@ -17,6 +17,7 @@ def uid(prefix: str) -> str:
 def customer_json(x): return {"id":x.id,"name":x.name,"phone":x.phone,"email":x.email,"nationality":x.nationality,"passportNumber":x.passport_number,"passportExpiry":x.passport_expiry,"notes":x.notes}
 def booking_json(x): return {"id":x.id,"customerId":x.customer_id,"type":x.type,"destination":x.destination,"travelDate":x.travel_date,"status":x.status,"cost":x.cost,"salePrice":x.sale_price,"reference":x.reference,"notes":x.notes}
 def payment_json(x): return {"id":x.id,"bookingId":x.booking_id,"amount":x.amount,"method":x.method,"date":x.date,"notes":x.notes}
+def invoice_json(x): return {"id":x.id,"bookingId":x.booking_id,"number":x.number,"issueDate":x.issue_date,"dueDate":x.due_date,"amount":x.amount,"status":x.status,"notes":x.notes}
 def visa_json(x): return {"id":x.id,"customerId":x.customer_id,"country":x.country,"visaType":x.visa_type,"status":x.status,"applicationDate":x.application_date,"expiryDate":x.expiry_date,"fee":x.fee,"notes":x.notes}
 def supplier_json(x): return {"id":x.id,"name":x.name,"type":x.type,"phone":x.phone,"email":x.email,"contactPerson":x.contact_person,"notes":x.notes}
 def user_json(x): return {"id":x.id,"name":x.name,"email":x.email,"role":x.role,"active":x.active}
@@ -74,6 +75,7 @@ def bootstrap(user: User = Depends(current_user), db: Session = Depends(get_db))
         "customers": [customer_json(x) for x in db.scalars(select(Customer).where(Customer.agency_id==aid)).all()],
         "bookings": [booking_json(x) for x in db.scalars(select(Booking).where(Booking.agency_id==aid)).all()],
         "payments": [payment_json(x) for x in db.scalars(select(Payment).where(Payment.agency_id==aid)).all()],
+        "invoices": [invoice_json(x) for x in db.scalars(select(Invoice).where(Invoice.agency_id==aid)).all()],
         "visas": [visa_json(x) for x in db.scalars(select(VisaCase).where(VisaCase.agency_id==aid)).all()],
         "suppliers": [supplier_json(x) for x in db.scalars(select(Supplier).where(Supplier.agency_id==aid)).all()],
         "users": [user_json(x) for x in db.scalars(select(User).where(User.agency_id==aid)).all()] if user.role=="admin" else [],
@@ -111,6 +113,7 @@ def delete_booking(item_id:str,user:User=Depends(current_user),db:Session=Depend
     x=db.get(Booking,item_id)
     if not x or x.agency_id!=user.agency_id: raise HTTPException(404,"Booking not found")
     for p in db.scalars(select(Payment).where(Payment.booking_id==item_id)).all(): db.delete(p)
+    for inv in db.scalars(select(Invoice).where(Invoice.booking_id==item_id)).all(): db.delete(inv)
     db.delete(x);db.commit();return {"ok":True}
 
 @app.post("/payments")
@@ -122,6 +125,38 @@ def add_payment(data:PaymentIn,user:User=Depends(current_user),db:Session=Depend
 def delete_payment(item_id:str,user:User=Depends(current_user),db:Session=Depends(get_db)):
     x=db.get(Payment,item_id)
     if not x or x.agency_id!=user.agency_id: raise HTTPException(404,"Payment not found")
+    db.delete(x);db.commit();return {"ok":True}
+
+
+@app.post("/invoices")
+def add_invoice(data:InvoiceIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    b=db.get(Booking,data.bookingId)
+    if not b or b.agency_id!=user.agency_id: raise HTTPException(400,"Invalid booking")
+    number=(data.number or "").strip()
+    if not number:
+        count=len(db.scalars(select(Invoice).where(Invoice.agency_id==user.agency_id)).all())+1
+        number=f"INV-{count:05d}"
+    if db.scalar(select(Invoice.id).where(Invoice.agency_id==user.agency_id, Invoice.number==number).limit(1)):
+        raise HTTPException(409,"Invoice number already exists")
+    x=Invoice(id=data.id or uid("inv"),agency_id=user.agency_id,booking_id=data.bookingId,number=number,issue_date=data.issueDate,due_date=data.dueDate,amount=data.amount or b.sale_price,status=data.status,notes=data.notes)
+    db.add(x);db.commit();db.refresh(x);return invoice_json(x)
+
+@app.put("/invoices/{item_id}")
+def update_invoice(item_id:str,data:InvoiceIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    x=db.get(Invoice,item_id)
+    if not x or x.agency_id!=user.agency_id: raise HTTPException(404,"Invoice not found")
+    b=db.get(Booking,data.bookingId)
+    if not b or b.agency_id!=user.agency_id: raise HTTPException(400,"Invalid booking")
+    number=(data.number or x.number).strip()
+    duplicate=db.scalar(select(Invoice).where(Invoice.agency_id==user.agency_id,Invoice.number==number,Invoice.id!=item_id).limit(1))
+    if duplicate: raise HTTPException(409,"Invoice number already exists")
+    x.booking_id=data.bookingId;x.number=number;x.issue_date=data.issueDate;x.due_date=data.dueDate;x.amount=data.amount;x.status=data.status;x.notes=data.notes
+    db.commit();return invoice_json(x)
+
+@app.delete("/invoices/{item_id}")
+def delete_invoice(item_id:str,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    x=db.get(Invoice,item_id)
+    if not x or x.agency_id!=user.agency_id: raise HTTPException(404,"Invoice not found")
     db.delete(x);db.commit();return {"ok":True}
 
 @app.post("/visas")
