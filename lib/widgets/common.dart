@@ -59,7 +59,7 @@ class StatusPill extends StatelessWidget {
     Color color;
     switch (status.toLowerCase()) {
       case 'confirmed': case 'approved': case 'paid': case 'completed': color = Colors.green; break;
-      case 'processing': case 'pending': color = Colors.orange; break;
+      case 'processing': case 'pending': case 'partial': case 'issued': color = Colors.orange; break;
       case 'cancelled': case 'rejected': case 'overdue': color = Colors.red; break;
       default: color = Colors.blue;
     }
