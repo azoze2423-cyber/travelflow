@@ -213,9 +213,9 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
             child: Text('Your journey, handled with confidence.', style: TextStyle(color: Colors.white, fontSize: mobile ? 38 : 58, height: 1.04, fontWeight: FontWeight.w900, letterSpacing: -1.8)),
           ),
           const SizedBox(height: 14),
-          const ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: 690),
-            child: Text('Search flights, compare fare options and send your booking request directly to our travel team.', style: TextStyle(color: Colors.white70, fontSize: 17, height: 1.55)),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 690),
+            child: const Text('Search flights, compare fare options and send your booking request directly to our travel team.', style: TextStyle(color: Colors.white70, fontSize: 17, height: 1.55)),
           ),
           const SizedBox(height: 32),
           _searchCard(mobile),
