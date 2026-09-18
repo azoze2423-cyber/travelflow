@@ -34,6 +34,16 @@ class PaymentIn(BaseModel):
     date: str = ""
     notes: str = ""
 
+class InvoiceIn(BaseModel):
+    id: str | None = None
+    bookingId: str
+    number: str = ""
+    issueDate: str = ""
+    dueDate: str = ""
+    amount: float = 0
+    status: str = "Issued"
+    notes: str = ""
+
 class VisaIn(BaseModel):
     id: str | None = None
     customerId: str
