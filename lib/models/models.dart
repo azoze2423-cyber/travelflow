@@ -177,6 +177,61 @@ class Invoice {
       );
 }
 
+
+class PortalRequest {
+  PortalRequest({
+    required this.id,
+    required this.offerId,
+    required this.airline,
+    required this.flightNumber,
+    required this.origin,
+    required this.destination,
+    required this.travelDate,
+    required this.passengerName,
+    required this.phone,
+    required this.email,
+    required this.adults,
+    required this.amount,
+    required this.currency,
+    required this.status,
+    required this.createdAt,
+  });
+
+  String id;
+  String offerId;
+  String airline;
+  String flightNumber;
+  String origin;
+  String destination;
+  String travelDate;
+  String passengerName;
+  String phone;
+  String email;
+  int adults;
+  double amount;
+  String currency;
+  String status;
+  String createdAt;
+
+  factory PortalRequest.fromJson(Map<String, dynamic> j) => PortalRequest(
+        id: j['id'] ?? '',
+        offerId: j['offerId'] ?? '',
+        airline: j['airline'] ?? '',
+        flightNumber: j['flightNumber'] ?? '',
+        origin: j['origin'] ?? '',
+        destination: j['destination'] ?? '',
+        travelDate: j['travelDate'] ?? '',
+        passengerName: j['passengerName'] ?? '',
+        phone: j['phone'] ?? '',
+        email: j['email'] ?? '',
+        adults: (j['adults'] ?? 1) as int,
+        amount: (j['amount'] ?? 0).toDouble(),
+        currency: j['currency'] ?? 'AED',
+        status: j['status'] ?? 'New',
+        createdAt: j['createdAt'] ?? '',
+      );
+}
+
 class VisaCase {
   VisaCase({
     required this.id,
