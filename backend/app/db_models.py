@@ -72,6 +72,25 @@ class Invoice(Base):
     notes: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+class PortalRequest(Base):
+    __tablename__ = "portal_requests"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    agency_id: Mapped[str] = mapped_column(ForeignKey("agencies.id"), index=True)
+    offer_id: Mapped[str] = mapped_column(String, default="")
+    airline: Mapped[str] = mapped_column(String, default="")
+    flight_number: Mapped[str] = mapped_column(String, default="")
+    origin: Mapped[str] = mapped_column(String, default="")
+    destination: Mapped[str] = mapped_column(String, default="")
+    travel_date: Mapped[str] = mapped_column(String, default="")
+    passenger_name: Mapped[str] = mapped_column(String)
+    phone: Mapped[str] = mapped_column(String, default="")
+    email: Mapped[str] = mapped_column(String, default="")
+    adults: Mapped[int] = mapped_column(default=1)
+    amount: Mapped[float] = mapped_column(Float, default=0)
+    currency: Mapped[str] = mapped_column(String, default="AED")
+    status: Mapped[str] = mapped_column(String, default="New")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
 class VisaCase(Base):
     __tablename__ = "visas"
     id: Mapped[str] = mapped_column(String, primary_key=True)
