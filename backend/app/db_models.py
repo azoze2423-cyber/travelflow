@@ -59,6 +59,19 @@ class Payment(Base):
     date: Mapped[str] = mapped_column(String, default="")
     notes: Mapped[str] = mapped_column(Text, default="")
 
+class Invoice(Base):
+    __tablename__ = "invoices"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    agency_id: Mapped[str] = mapped_column(ForeignKey("agencies.id"), index=True)
+    booking_id: Mapped[str] = mapped_column(ForeignKey("bookings.id"), index=True)
+    number: Mapped[str] = mapped_column(String, index=True)
+    issue_date: Mapped[str] = mapped_column(String, default="")
+    due_date: Mapped[str] = mapped_column(String, default="")
+    amount: Mapped[float] = mapped_column(Float, default=0)
+    status: Mapped[str] = mapped_column(String, default="Issued")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
 class VisaCase(Base):
     __tablename__ = "visas"
     id: Mapped[str] = mapped_column(String, primary_key=True)
