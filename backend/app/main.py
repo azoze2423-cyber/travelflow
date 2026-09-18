@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from .auth import admin_user, create_token, current_user, hash_password, verify_password
 from .config import settings
 from .database import Base, SessionLocal, engine, get_db
+from .flight_provider import FlightProviderError, provider_status, search_flights
 from .db_models import Agency, Booking, Customer, Invoice, Payment, PortalRequest, Supplier, User, VisaCase
 from .schemas import AccountIn, BookingIn, CustomerIn, FlightSearchIn, InvoiceIn, LoginIn, PaymentIn, PortalRequestIn, PortalRequestStatusIn, SettingsIn, SupplierIn, UserIn, VisaIn
 
@@ -68,23 +69,23 @@ def public_agency(db: Session = Depends(get_db)):
     if not agency: raise HTTPException(503,"Agency is not configured")
     return agency_json(agency)
 
+@app.get("/public/flights/provider")
+def public_flight_provider():
+    return provider_status()
+
 @app.post("/public/flights/search")
 def public_flight_search(data: FlightSearchIn):
     origin=data.origin.strip().upper()
     destination=data.destination.strip().upper()
-    if len(origin)<3 or len(destination)<3 or origin==destination:
-        raise HTTPException(400,"Enter valid origin and destination airport codes")
+    if len(origin)!=3 or len(destination)!=3 or origin==destination:
+        raise HTTPException(400,"Enter valid 3-letter origin and destination airport codes")
     if not data.travelDate.strip():
         raise HTTPException(400,"Travel date is required")
     adults=max(1,min(data.adults,9))
-    route_factor=(sum(ord(ch) for ch in origin+destination)%170)
-    base=540+route_factor
-    offers=[
-        {"id":"demo-3t-flex","airline":"Tarco Aviation","airlineCode":"3T","flightNumber":"3T Demo","origin":origin,"destination":destination,"travelDate":data.travelDate,"departureTime":"09:20","arrivalTime":"12:10","duration":"2h 50m","cabin":"Economy","baggage":"30 kg","fareName":"Value","amount":float((base+120)*adults),"currency":"AED","refundable":False},
-        {"id":"demo-tf-smart","airline":"TravelFlow Connect","airlineCode":"TF","flightNumber":"TF 208","origin":origin,"destination":destination,"travelDate":data.travelDate,"departureTime":"14:40","arrivalTime":"17:25","duration":"2h 45m","cabin":"Economy","baggage":"25 kg","fareName":"Smart","amount":float(base*adults),"currency":"AED","refundable":False},
-        {"id":"demo-tf-flex","airline":"TravelFlow Connect","airlineCode":"TF","flightNumber":"TF 412","origin":origin,"destination":destination,"travelDate":data.travelDate,"departureTime":"20:15","arrivalTime":"23:05","duration":"2h 50m","cabin":"Economy","baggage":"35 kg","fareName":"Flex","amount":float((base+260)*adults),"currency":"AED","refundable":True},
-    ]
-    return {"inventoryMode":"demo","notice":"Demo fares for portal development only. Live airline inventory will be connected through an approved GDS/NDC/API provider.","offers":offers}
+    try:
+        return search_flights(origin, destination, data.travelDate.strip(), adults)
+    except FlightProviderError as exc:
+        raise HTTPException(502, str(exc))
 
 @app.post("/public/booking-requests")
 def public_booking_request(data: PortalRequestIn, db: Session = Depends(get_db)):
