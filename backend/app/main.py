@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 from .auth import admin_user, create_token, current_user, hash_password, verify_password
 from .config import settings
 from .database import Base, SessionLocal, engine, get_db
-from .db_models import Agency, Booking, Customer, Invoice, Payment, Supplier, User, VisaCase
-from .schemas import AccountIn, BookingIn, CustomerIn, InvoiceIn, LoginIn, PaymentIn, SettingsIn, SupplierIn, UserIn, VisaIn
+from .db_models import Agency, Booking, Customer, Invoice, Payment, PortalRequest, Supplier, User, VisaCase
+from .schemas import AccountIn, BookingIn, CustomerIn, FlightSearchIn, InvoiceIn, LoginIn, PaymentIn, PortalRequestIn, PortalRequestStatusIn, SettingsIn, SupplierIn, UserIn, VisaIn
 
 
 def uid(prefix: str) -> str:
@@ -22,6 +22,7 @@ def visa_json(x): return {"id":x.id,"customerId":x.customer_id,"country":x.count
 def supplier_json(x): return {"id":x.id,"name":x.name,"type":x.type,"phone":x.phone,"email":x.email,"contactPerson":x.contact_person,"notes":x.notes}
 def user_json(x): return {"id":x.id,"name":x.name,"email":x.email,"role":x.role,"active":x.active}
 def agency_json(x): return {"id":x.id,"name":x.name,"currency":x.currency,"phone":x.phone,"address":x.address}
+def portal_request_json(x): return {"id":x.id,"offerId":x.offer_id,"airline":x.airline,"flightNumber":x.flight_number,"origin":x.origin,"destination":x.destination,"travelDate":x.travel_date,"passengerName":x.passenger_name,"phone":x.phone,"email":x.email,"adults":x.adults,"amount":x.amount,"currency":x.currency,"status":x.status,"createdAt":x.created_at.isoformat() if x.created_at else ""}
 
 def seed_database():
     Base.metadata.create_all(engine)
@@ -60,6 +61,47 @@ app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins, allow
 @app.get("/health")
 def health(): return {"ok": True, "service": "travelflow-api"}
 
+
+@app.get("/public/agency")
+def public_agency(db: Session = Depends(get_db)):
+    agency=db.scalar(select(Agency).limit(1))
+    if not agency: raise HTTPException(503,"Agency is not configured")
+    return agency_json(agency)
+
+@app.post("/public/flights/search")
+def public_flight_search(data: FlightSearchIn):
+    origin=data.origin.strip().upper()
+    destination=data.destination.strip().upper()
+    if len(origin)<3 or len(destination)<3 or origin==destination:
+        raise HTTPException(400,"Enter valid origin and destination airport codes")
+    if not data.travelDate.strip():
+        raise HTTPException(400,"Travel date is required")
+    adults=max(1,min(data.adults,9))
+    route_factor=(sum(ord(ch) for ch in origin+destination)%170)
+    base=540+route_factor
+    offers=[
+        {"id":"demo-3t-flex","airline":"Tarco Aviation","airlineCode":"3T","flightNumber":"3T Demo","origin":origin,"destination":destination,"travelDate":data.travelDate,"departureTime":"09:20","arrivalTime":"12:10","duration":"2h 50m","cabin":"Economy","baggage":"30 kg","fareName":"Value","amount":float((base+120)*adults),"currency":"AED","refundable":False},
+        {"id":"demo-tf-smart","airline":"TravelFlow Connect","airlineCode":"TF","flightNumber":"TF 208","origin":origin,"destination":destination,"travelDate":data.travelDate,"departureTime":"14:40","arrivalTime":"17:25","duration":"2h 45m","cabin":"Economy","baggage":"25 kg","fareName":"Smart","amount":float(base*adults),"currency":"AED","refundable":False},
+        {"id":"demo-tf-flex","airline":"TravelFlow Connect","airlineCode":"TF","flightNumber":"TF 412","origin":origin,"destination":destination,"travelDate":data.travelDate,"departureTime":"20:15","arrivalTime":"23:05","duration":"2h 50m","cabin":"Economy","baggage":"35 kg","fareName":"Flex","amount":float((base+260)*adults),"currency":"AED","refundable":True},
+    ]
+    return {"inventoryMode":"demo","notice":"Demo fares for portal development only. Live airline inventory will be connected through an approved GDS/NDC/API provider.","offers":offers}
+
+@app.post("/public/booking-requests")
+def public_booking_request(data: PortalRequestIn, db: Session = Depends(get_db)):
+    agency=db.scalar(select(Agency).limit(1))
+    if not agency: raise HTTPException(503,"Agency is not configured")
+    if len(data.passengerName.strip())<2: raise HTTPException(400,"Passenger name is required")
+    if len(data.phone.strip())<7: raise HTTPException(400,"A valid phone number is required")
+    x=PortalRequest(
+        id=uid("req"),agency_id=agency.id,offer_id=data.offerId,airline=data.airline,
+        flight_number=data.flightNumber,origin=data.origin.upper(),destination=data.destination.upper(),
+        travel_date=data.travelDate,passenger_name=data.passengerName.strip(),phone=data.phone.strip(),
+        email=data.email.strip().lower(),adults=max(1,min(data.adults,9)),amount=max(0,data.amount),
+        currency=data.currency or agency.currency,status="New"
+    )
+    db.add(x);db.commit();db.refresh(x)
+    return {"ok":True,"requestNumber":x.id,"status":x.status,"message":"Your booking request has been sent to the agency."}
+
 @app.post("/auth/login")
 def login(data: LoginIn, db: Session = Depends(get_db)):
     user = db.scalar(select(User).where(User.email == data.email.lower()))
@@ -76,10 +118,20 @@ def bootstrap(user: User = Depends(current_user), db: Session = Depends(get_db))
         "bookings": [booking_json(x) for x in db.scalars(select(Booking).where(Booking.agency_id==aid)).all()],
         "payments": [payment_json(x) for x in db.scalars(select(Payment).where(Payment.agency_id==aid)).all()],
         "invoices": [invoice_json(x) for x in db.scalars(select(Invoice).where(Invoice.agency_id==aid)).all()],
+        "portalRequests": [portal_request_json(x) for x in db.scalars(select(PortalRequest).where(PortalRequest.agency_id==aid).order_by(PortalRequest.created_at.desc())).all()],
         "visas": [visa_json(x) for x in db.scalars(select(VisaCase).where(VisaCase.agency_id==aid)).all()],
         "suppliers": [supplier_json(x) for x in db.scalars(select(Supplier).where(Supplier.agency_id==aid)).all()],
         "users": [user_json(x) for x in db.scalars(select(User).where(User.agency_id==aid)).all()] if user.role=="admin" else [],
     }
+
+
+@app.put("/portal-requests/{item_id}/status")
+def update_portal_request_status(item_id:str,data:PortalRequestStatusIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    x=db.get(PortalRequest,item_id)
+    if not x or x.agency_id!=user.agency_id: raise HTTPException(404,"Online request not found")
+    allowed={"New","Contacted","Quoted","Confirmed","Cancelled"}
+    if data.status not in allowed: raise HTTPException(400,"Invalid request status")
+    x.status=data.status;db.commit();db.refresh(x);return portal_request_json(x)
 
 @app.post("/customers")
 def add_customer(data: CustomerIn, user: User=Depends(current_user), db: Session=Depends(get_db)):

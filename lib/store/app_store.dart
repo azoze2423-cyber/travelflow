@@ -9,6 +9,7 @@ class AppStore extends ChangeNotifier {
   final List<Booking> bookings = [];
   final List<Payment> payments = [];
   final List<Invoice> invoices = [];
+  final List<PortalRequest> portalRequests = [];
   final List<VisaCase> visas = [];
   final List<Supplier> suppliers = [];
   final List<UserAccount> users = [];
@@ -60,7 +61,7 @@ class AppStore extends ChangeNotifier {
   Future<void> logout() async {
     await api.clearToken();
     isAuthenticated = false;
-    customers.clear(); bookings.clear(); payments.clear(); invoices.clear(); visas.clear(); suppliers.clear(); users.clear();
+    customers.clear(); bookings.clear(); payments.clear(); invoices.clear(); portalRequests.clear(); visas.clear(); suppliers.clear(); users.clear();
     notifyListeners();
   }
 
@@ -80,6 +81,7 @@ class AppStore extends ChangeNotifier {
     bookings..clear()..addAll((data['bookings'] as List? ?? []).map((e) => Booking.fromJson(Map<String, dynamic>.from(e))));
     payments..clear()..addAll((data['payments'] as List? ?? []).map((e) => Payment.fromJson(Map<String, dynamic>.from(e))));
     invoices..clear()..addAll((data['invoices'] as List? ?? []).map((e) => Invoice.fromJson(Map<String, dynamic>.from(e))));
+    portalRequests..clear()..addAll((data['portalRequests'] as List? ?? []).map((e) => PortalRequest.fromJson(Map<String, dynamic>.from(e))));
     visas..clear()..addAll((data['visas'] as List? ?? []).map((e) => VisaCase.fromJson(Map<String, dynamic>.from(e))));
     suppliers..clear()..addAll((data['suppliers'] as List? ?? []).map((e) => Supplier.fromJson(Map<String, dynamic>.from(e))));
     users..clear()..addAll((data['users'] as List? ?? []).map((e) => UserAccount.fromJson(Map<String, dynamic>.from(e))));
@@ -110,6 +112,8 @@ class AppStore extends ChangeNotifier {
   Future<void> addInvoice(Invoice invoice) async { final x=Invoice.fromJson(Map<String,dynamic>.from(await api.post('/invoices',invoice.toJson()))); invoices.add(x); notifyListeners(); }
   Future<void> updateInvoice(Invoice invoice) async { final x=Invoice.fromJson(Map<String,dynamic>.from(await api.put('/invoices/${invoice.id}',invoice.toJson()))); final i=invoices.indexWhere((e)=>e.id==invoice.id); if(i>=0) invoices[i]=x; notifyListeners(); }
   Future<void> deleteInvoice(String id) async { await api.delete('/invoices/$id'); invoices.removeWhere((e)=>e.id==id); notifyListeners(); }
+
+  Future<void> updatePortalRequestStatus(String id, String status) async { final x=PortalRequest.fromJson(Map<String,dynamic>.from(await api.put('/portal-requests/$id/status', {'status':status}))); final i=portalRequests.indexWhere((e)=>e.id==id); if(i>=0) portalRequests[i]=x; notifyListeners(); }
 
   Future<void> addVisa(VisaCase v) async { final x=VisaCase.fromJson(Map<String,dynamic>.from(await api.post('/visas',v.toJson()))); visas.add(x); notifyListeners(); }
   Future<void> updateVisa(VisaCase v) async { final x=VisaCase.fromJson(Map<String,dynamic>.from(await api.put('/visas/${v.id}',v.toJson()))); final i=visas.indexWhere((e)=>e.id==v.id); if(i>=0) visas[i]=x; notifyListeners(); }
