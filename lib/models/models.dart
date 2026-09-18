@@ -194,6 +194,11 @@ class PortalRequest {
     required this.amount,
     required this.currency,
     required this.status,
+    required this.provider,
+    required this.providerOrderId,
+    required this.bookingReference,
+    required this.bookingId,
+    required this.paymentStatus,
     required this.createdAt,
   });
 
@@ -211,7 +216,14 @@ class PortalRequest {
   double amount;
   String currency;
   String status;
+  String provider;
+  String providerOrderId;
+  String bookingReference;
+  String bookingId;
+  String paymentStatus;
   String createdAt;
+
+  bool get isProviderOrder => providerOrderId.isNotEmpty;
 
   factory PortalRequest.fromJson(Map<String, dynamic> j) => PortalRequest(
         id: j['id'] ?? '',
@@ -228,6 +240,11 @@ class PortalRequest {
         amount: (j['amount'] ?? 0).toDouble(),
         currency: j['currency'] ?? 'AED',
         status: j['status'] ?? 'New',
+        provider: j['provider'] ?? '',
+        providerOrderId: j['providerOrderId'] ?? '',
+        bookingReference: j['bookingReference'] ?? '',
+        bookingId: j['bookingId'] ?? '',
+        paymentStatus: j['paymentStatus'] ?? '',
         createdAt: j['createdAt'] ?? '',
       );
 }
