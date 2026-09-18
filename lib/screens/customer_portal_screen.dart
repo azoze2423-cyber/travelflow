@@ -76,72 +76,395 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
   }
 
   Future<void> _book(Map<String, dynamic> offer) async {
+    if (inventoryMode == 'duffel_test') {
+      await _bookDuffelTest(offer);
+      return;
+    }
+    await _requestBooking(offer);
+  }
+
+  Future<void> _bookDuffelTest(Map<String, dynamic> offer) async {
+    final passengers = List.generate(adults, (_) => _PassengerControllers());
+    bool sending = false;
+    String? dialogError;
+
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setLocal) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+            title: const Row(
+              children: [
+                Icon(Icons.verified_user_outlined, color: Color(0xFF0F766E)),
+                SizedBox(width: 10),
+                Text('Passenger details'),
+              ],
+            ),
+            content: SizedBox(
+              width: 760,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _offerSummary(offer, compact: true),
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF7ED),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFFED7AA)),
+                      ),
+                      child: const Text(
+                        'Duffel Test Mode: confirming below creates a real test Order/booking reference inside Duffel, but no live ticket or real money movement occurs.',
+                        style: TextStyle(color: Color(0xFF9A3412), fontWeight: FontWeight.w700, height: 1.4),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    for (var i = 0; i < passengers.length; i++) ...[
+                      _passengerEditor(
+                        index: i,
+                        passenger: passengers[i],
+                        onChanged: () => setLocal(() {}),
+                      ),
+                      if (i != passengers.length - 1) const SizedBox(height: 14),
+                    ],
+                    if (dialogError != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 14),
+                        child: Text(dialogError!, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w700)),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: sending ? null : () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              FilledButton.icon(
+                onPressed: sending
+                    ? null
+                    : () async {
+                        final validation = _validatePassengers(passengers);
+                        if (validation != null) {
+                          setLocal(() => dialogError = validation);
+                          return;
+                        }
+                        setLocal(() {
+                          sending = true;
+                          dialogError = null;
+                        });
+                        try {
+                          final result = Map<String, dynamic>.from(
+                            await api.post('/public/flights/test-orders', {
+                              'offerId': offer['id']?.toString() ?? '',
+                              'passengers': passengers.map((p) => p.toJson()).toList(),
+                            }),
+                          );
+                          if (!mounted) return;
+                          Navigator.pop(dialogContext);
+                          _orderSuccess(result);
+                        } on ApiException catch (e) {
+                          setLocal(() {
+                            dialogError = e.message;
+                            sending = false;
+                          });
+                        }
+                      },
+                icon: sending
+                    ? const SizedBox(
+                        width: 17,
+                        height: 17,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.flight_takeoff_rounded),
+                label: Text(sending ? 'Creating test order...' : 'Confirm test booking'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      for (final passenger in passengers) {
+        passenger.dispose();
+      }
+    }
+  }
+
+  Widget _passengerEditor({
+    required int index,
+    required _PassengerControllers passenger,
+    required VoidCallback onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Passenger ${index + 1}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              SizedBox(
+                width: 130,
+                child: DropdownButtonFormField<String>(
+                  initialValue: passenger.title,
+                  decoration: const InputDecoration(labelText: 'Title'),
+                  items: const [
+                    DropdownMenuItem(value: 'mr', child: Text('Mr')),
+                    DropdownMenuItem(value: 'mrs', child: Text('Mrs')),
+                    DropdownMenuItem(value: 'ms', child: Text('Ms')),
+                    DropdownMenuItem(value: 'miss', child: Text('Miss')),
+                    DropdownMenuItem(value: 'dr', child: Text('Dr')),
+                  ],
+                  onChanged: (v) {
+                    passenger.title = v ?? 'mr';
+                    onChanged();
+                  },
+                ),
+              ),
+              SizedBox(
+                width: 150,
+                child: DropdownButtonFormField<String>(
+                  initialValue: passenger.gender,
+                  decoration: const InputDecoration(labelText: 'Gender'),
+                  items: const [
+                    DropdownMenuItem(value: 'm', child: Text('Male')),
+                    DropdownMenuItem(value: 'f', child: Text('Female')),
+                  ],
+                  onChanged: (v) {
+                    passenger.gender = v ?? 'm';
+                    onChanged();
+                  },
+                ),
+              ),
+              SizedBox(
+                width: 210,
+                child: TextField(
+                  controller: passenger.givenName,
+                  decoration: const InputDecoration(labelText: 'Given name'),
+                ),
+              ),
+              SizedBox(
+                width: 210,
+                child: TextField(
+                  controller: passenger.familyName,
+                  decoration: const InputDecoration(labelText: 'Family name'),
+                ),
+              ),
+              SizedBox(
+                width: 210,
+                child: TextField(
+                  controller: passenger.bornOn,
+                  readOnly: true,
+                  onTap: () => _pickPassengerBirthDate(passenger.bornOn),
+                  decoration: const InputDecoration(
+                    labelText: 'Date of birth',
+                    hintText: 'YYYY-MM-DD',
+                    suffixIcon: Icon(Icons.calendar_month_outlined),
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 245,
+                child: TextField(
+                  controller: passenger.email,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(labelText: 'Passenger email'),
+                ),
+              ),
+              SizedBox(
+                width: 245,
+                child: TextField(
+                  controller: passenger.phone,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(labelText: 'Passenger phone', hintText: '+971...'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Use the passenger’s own email and phone where possible. Names should match the travel document.',
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickPassengerBirthDate(TextEditingController controller) async {
+    final current = DateTime.tryParse(controller.text);
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: current ?? DateTime(now.year - 30, now.month, now.day),
+      firstDate: DateTime(1900),
+      lastDate: now,
+    );
+    if (picked != null) {
+      controller.text =
+          '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+    }
+  }
+
+  String? _validatePassengers(List<_PassengerControllers> passengers) {
+    for (var i = 0; i < passengers.length; i++) {
+      final p = passengers[i];
+      final number = i + 1;
+      if (p.givenName.text.trim().isEmpty || p.familyName.text.trim().isEmpty) {
+        return 'Passenger $number: enter the given name and family name.';
+      }
+      if (DateTime.tryParse(p.bornOn.text.trim()) == null) {
+        return 'Passenger $number: choose a valid date of birth.';
+      }
+      final email = p.email.text.trim();
+      if (!email.contains('@') || !email.split('@').last.contains('.')) {
+        return 'Passenger $number: enter a valid email address.';
+      }
+      if (p.phone.text.replaceAll(RegExp(r'[^0-9]'), '').length < 7) {
+        return 'Passenger $number: enter a valid phone number with country code.';
+      }
+    }
+    return null;
+  }
+
+  Future<void> _requestBooking(Map<String, dynamic> offer) async {
     final name = TextEditingController();
     final phone = TextEditingController();
     final email = TextEditingController();
     bool sending = false;
     String? dialogError;
 
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: !sending,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setLocal) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-          title: const Text('Complete your request'),
-          content: SizedBox(
-            width: 560,
-            child: SingleChildScrollView(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                _offerSummary(offer, compact: true),
-                const SizedBox(height: 18),
-                TextField(controller: name, decoration: const InputDecoration(labelText: 'Passenger full name', prefixIcon: Icon(Icons.person_outline))),
-                const SizedBox(height: 12),
-                TextField(controller: phone, decoration: const InputDecoration(labelText: 'WhatsApp / phone', hintText: '+971...', prefixIcon: Icon(Icons.phone_outlined))),
-                const SizedBox(height: 12),
-                TextField(controller: email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Email (optional)', prefixIcon: Icon(Icons.email_outlined))),
-                if (dialogError != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(dialogError!, style: const TextStyle(color: Colors.red))),
-                const SizedBox(height: 10),
-                Text(inventoryMode == 'duffel_test' ? 'Duffel Test Mode is active. No live order or money movement will happen yet.' : 'The agency will confirm availability and fare before ticketing.', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-              ]),
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setLocal) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+            title: const Text('Complete your request'),
+            content: SizedBox(
+              width: 560,
+              child: SingleChildScrollView(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  _offerSummary(offer, compact: true),
+                  const SizedBox(height: 18),
+                  TextField(controller: name, decoration: const InputDecoration(labelText: 'Passenger full name', prefixIcon: Icon(Icons.person_outline))),
+                  const SizedBox(height: 12),
+                  TextField(controller: phone, decoration: const InputDecoration(labelText: 'WhatsApp / phone', hintText: '+971...', prefixIcon: Icon(Icons.phone_outlined))),
+                  const SizedBox(height: 12),
+                  TextField(controller: email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Email (optional)', prefixIcon: Icon(Icons.email_outlined))),
+                  if (dialogError != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(dialogError!, style: const TextStyle(color: Colors.red))),
+                  const SizedBox(height: 10),
+                  Text('The agency will confirm availability and fare before ticketing.', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                ]),
+              ),
             ),
+            actions: [
+              TextButton(onPressed: sending ? null : () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+              FilledButton.icon(
+                onPressed: sending ? null : () async {
+                  if (name.text.trim().length < 2 || phone.text.trim().length < 7) {
+                    setLocal(() => dialogError = 'Enter the passenger name and a valid phone number.');
+                    return;
+                  }
+                  setLocal(() { sending = true; dialogError = null; });
+                  try {
+                    final result = Map<String, dynamic>.from(await api.post('/public/booking-requests', {
+                      'offerId': offer['id']?.toString() ?? '',
+                      'airline': offer['airline']?.toString() ?? '',
+                      'flightNumber': offer['flightNumber']?.toString() ?? '',
+                      'origin': offer['origin']?.toString() ?? '',
+                      'destination': offer['destination']?.toString() ?? '',
+                      'travelDate': offer['travelDate']?.toString() ?? '',
+                      'passengerName': name.text.trim(),
+                      'phone': phone.text.trim(),
+                      'email': email.text.trim(),
+                      'adults': adults,
+                      'amount': (offer['amount'] ?? 0).toDouble(),
+                      'currency': offer['currency']?.toString() ?? 'AED',
+                    }));
+                    if (!mounted) return;
+                    Navigator.pop(dialogContext);
+                    _success(result['requestNumber']?.toString() ?? '');
+                  } on ApiException catch (e) {
+                    setLocal(() { dialogError = e.message; sending = false; });
+                  }
+                },
+                icon: sending ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.send_outlined),
+                label: Text(sending ? 'Sending...' : 'Request booking'),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(onPressed: sending ? null : () => Navigator.pop(dialogContext), child: const Text('Cancel')),
-            FilledButton.icon(
-              onPressed: sending ? null : () async {
-                if (name.text.trim().length < 2 || phone.text.trim().length < 7) {
-                  setLocal(() => dialogError = 'Enter the passenger name and a valid phone number.');
-                  return;
-                }
-                setLocal(() { sending = true; dialogError = null; });
-                try {
-                  final result = Map<String, dynamic>.from(await api.post('/public/booking-requests', {
-                    'offerId': offer['id']?.toString() ?? '',
-                    'airline': offer['airline']?.toString() ?? '',
-                    'flightNumber': offer['flightNumber']?.toString() ?? '',
-                    'origin': offer['origin']?.toString() ?? '',
-                    'destination': offer['destination']?.toString() ?? '',
-                    'travelDate': offer['travelDate']?.toString() ?? '',
-                    'passengerName': name.text.trim(), 'phone': phone.text.trim(), 'email': email.text.trim(),
-                    'adults': adults, 'amount': (offer['amount'] ?? 0).toDouble(),
-                    'currency': offer['currency']?.toString() ?? 'AED',
-                  }));
-                  if (!mounted) return;
-                  Navigator.pop(dialogContext);
-                  _success(result['requestNumber']?.toString() ?? '');
-                } on ApiException catch (e) {
-                  setLocal(() { dialogError = e.message; sending = false; });
-                }
-              },
-              icon: sending ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.send_outlined),
-              label: Text(sending ? 'Sending...' : 'Request booking'),
-            ),
-          ],
         ),
+      );
+    } finally {
+      name.dispose();
+      phone.dispose();
+      email.dispose();
+    }
+  }
+
+  void _orderSuccess(Map<String, dynamic> result) {
+    final bookingReference = result['bookingReference']?.toString() ?? '';
+    final orderId = result['orderId']?.toString() ?? '';
+    final amount = (result['amount'] ?? 0).toDouble();
+    final currency = result['currency']?.toString() ?? '';
+    final requestNumber = result['requestNumber']?.toString() ?? '';
+
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        icon: const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 58),
+        title: const Text('Test booking confirmed'),
+        content: SizedBox(
+          width: 540,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Duffel created the test order successfully. This is not a live ticket and no real money moved.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 18),
+              _confirmationLine('Booking reference', bookingReference.isEmpty ? 'Pending' : bookingReference),
+              _confirmationLine('Duffel order', orderId),
+              _confirmationLine('TravelFlow request', requestNumber),
+              _confirmationLine('Test total', '$currency ${amount.toStringAsFixed(2)}'),
+            ],
+          ),
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Done')),
+        ],
       ),
     );
   }
+
+  Widget _confirmationLine(String label, String value) => Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(12)),
+        child: Row(
+          children: [
+            SizedBox(width: 135, child: Text(label, style: const TextStyle(fontWeight: FontWeight.w700))),
+            Expanded(child: SelectableText(value)),
+          ],
+        ),
+      );
 
   void _success(String requestNumber) {
     showDialog<void>(
@@ -408,6 +731,36 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
       const Text('Powered by TravelFlow', style: TextStyle(color: Colors.white38, fontSize: 11)),
     ]),
   );
+}
+
+class _PassengerControllers {
+  _PassengerControllers();
+
+  String title = 'mr';
+  String gender = 'm';
+  final givenName = TextEditingController();
+  final familyName = TextEditingController();
+  final bornOn = TextEditingController();
+  final email = TextEditingController();
+  final phone = TextEditingController();
+
+  Map<String, dynamic> toJson() => {
+        'title': title,
+        'gender': gender,
+        'givenName': givenName.text.trim(),
+        'familyName': familyName.text.trim(),
+        'bornOn': bornOn.text.trim(),
+        'email': email.text.trim(),
+        'phoneNumber': phone.text.trim(),
+      };
+
+  void dispose() {
+    givenName.dispose();
+    familyName.dispose();
+    bornOn.dispose();
+    email.dispose();
+    phone.dispose();
+  }
 }
 
 class _TrustItem extends StatelessWidget {

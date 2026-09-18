@@ -21,12 +21,13 @@ class _OnlineRequestsPageState extends State<OnlineRequestsPage> {
         .toList();
 
     final newCount = widget.store.portalRequests.where((e) => e.status == 'New').length;
+    final providerOrders = widget.store.portalRequests.where((e) => e.isProviderOrder).length;
 
     return Column(
       children: [
         PageHeader(
-          title: 'Online requests',
-          subtitle: 'Booking leads sent from your public customer portal',
+          title: 'Online bookings',
+          subtitle: 'Customer requests and Duffel test bookings from your public portal',
           action: FilledButton.icon(
             onPressed: widget.store.refresh,
             icon: const Icon(Icons.refresh_rounded),
@@ -41,6 +42,10 @@ class _OnlineRequestsPageState extends State<OnlineRequestsPage> {
             SizedBox(
               width: 230,
               child: KpiCard(label: 'New requests', value: '$newCount', icon: Icons.mark_email_unread_outlined),
+            ),
+            SizedBox(
+              width: 230,
+              child: KpiCard(label: 'Duffel test orders', value: '$providerOrders', icon: Icons.confirmation_number_outlined),
             ),
             SizedBox(
               width: 230,
@@ -96,7 +101,7 @@ class _OnlineRequestsPageState extends State<OnlineRequestsPage> {
                         subtitle: Text(
                           '${r.origin} → ${r.destination} • ${r.travelDate}\n'
                           '${r.airline} ${r.flightNumber} • ${r.adults} traveler(s) • ${money(r.amount, r.currency)}\n'
-                          '${r.phone}${r.email.isEmpty ? '' : ' • ${r.email}'}',
+                          '${r.bookingReference.isNotEmpty ? 'PNR ${r.bookingReference} • ' : ''}${r.phone}${r.email.isEmpty ? '' : ' • ${r.email}'}',
                         ),
                         isThreeLine: true,
                         trailing: PopupMenuButton<String>(
@@ -136,6 +141,10 @@ class _OnlineRequestsPageState extends State<OnlineRequestsPage> {
               _line('Fare shown', money(r.amount, r.currency)),
               _line('Phone', r.phone),
               if (r.email.isNotEmpty) _line('Email', r.email),
+              if (r.provider.isNotEmpty) _line('Provider', r.provider),
+              if (r.bookingReference.isNotEmpty) _line('Booking reference', r.bookingReference),
+              if (r.providerOrderId.isNotEmpty) _line('Provider order', r.providerOrderId),
+              if (r.paymentStatus.isNotEmpty) _line('Payment', r.paymentStatus),
               _line('Status', r.status),
             ],
           ),
