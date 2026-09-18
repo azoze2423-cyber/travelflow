@@ -64,6 +64,29 @@ class SupplierIn(BaseModel):
     contactPerson: str = ""
     notes: str = ""
 
+class FlightSearchIn(BaseModel):
+    origin: str
+    destination: str
+    travelDate: str
+    adults: int = 1
+
+class PortalRequestIn(BaseModel):
+    offerId: str
+    airline: str
+    flightNumber: str = ""
+    origin: str
+    destination: str
+    travelDate: str
+    passengerName: str
+    phone: str
+    email: str = ""
+    adults: int = 1
+    amount: float = 0
+    currency: str = "AED"
+
+class PortalRequestStatusIn(BaseModel):
+    status: str
+
 class SettingsIn(BaseModel):
     name: str
     currency: str = "AED"
