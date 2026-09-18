@@ -89,6 +89,12 @@ class PortalRequest(Base):
     amount: Mapped[float] = mapped_column(Float, default=0)
     currency: Mapped[str] = mapped_column(String, default="AED")
     status: Mapped[str] = mapped_column(String, default="New")
+    provider: Mapped[str] = mapped_column(String, default="")
+    provider_order_id: Mapped[str] = mapped_column(String, default="", index=True)
+    booking_reference: Mapped[str] = mapped_column(String, default="")
+    booking_id: Mapped[str | None] = mapped_column(ForeignKey("bookings.id"), nullable=True, index=True)
+    payment_status: Mapped[str] = mapped_column(String, default="")
+    passenger_data: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class VisaCase(Base):
