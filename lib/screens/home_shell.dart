@@ -4,6 +4,7 @@ import 'bookings_page.dart';
 import 'customers_page.dart';
 import 'dashboard_page.dart';
 import 'payments_page.dart';
+import 'invoices_page.dart';
 import 'reports_page.dart';
 import 'settings_page.dart';
 import 'suppliers_page.dart';
@@ -24,6 +25,7 @@ class _HomeShellState extends State<HomeShell>{
     _NavItem('Customers',Icons.people_outline,CustomersPage(store:widget.store)),
     _NavItem('Bookings',Icons.luggage_outlined,BookingsPage(store:widget.store)),
     _NavItem('Payments',Icons.payments_outlined,PaymentsPage(store:widget.store)),
+    _NavItem('Invoices',Icons.receipt_long_outlined,InvoicesPage(store:widget.store)),
     _NavItem('Visas',Icons.description_outlined,VisasPage(store:widget.store)),
     _NavItem('Suppliers',Icons.business_outlined,SuppliersPage(store:widget.store)),
     _NavItem('Reports',Icons.bar_chart_outlined,ReportsPage(store:widget.store)),
