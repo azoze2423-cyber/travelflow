@@ -15,5 +15,6 @@ class Settings:
     agency_name = os.getenv("AGENCY_NAME", "TravelFlow Agency")
     currency = os.getenv("CURRENCY", "AED")
     seed_demo = os.getenv("SEED_DEMO", "true").lower() in {"1", "true", "yes", "on"}
+    duffel_access_token = os.getenv("DUFFEL_ACCESS_TOKEN", "").strip()
 
 settings = Settings()
