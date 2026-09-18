@@ -17,12 +17,14 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
   final travelDate = TextEditingController(text: DateTime.now().add(const Duration(days: 14)).toIso8601String().substring(0, 10));
   int adults = 1;
   bool loading = false;
+  bool searched = false;
   String? error;
   String agencyName = 'TravelFlow';
   String agencyPhone = '';
   String agencyAddress = '';
   List<Map<String, dynamic>> offers = [];
   String inventoryMode = '';
+  String providerNotice = '';
 
   @override
   void initState() {
@@ -43,7 +45,7 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
   }
 
   Future<void> _search() async {
-    setState(() { loading = true; error = null; offers = []; });
+    setState(() { loading = true; searched = true; error = null; offers = []; providerNotice = ''; });
     try {
       final data = Map<String, dynamic>.from(await api.post('/public/flights/search', {
         'origin': origin.text.trim(), 'destination': destination.text.trim(),
@@ -52,6 +54,7 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
       if (!mounted) return;
       setState(() {
         inventoryMode = data['inventoryMode']?.toString() ?? '';
+        providerNotice = data['notice']?.toString() ?? '';
         offers = (data['offers'] as List? ?? []).map((e) => Map<String, dynamic>.from(e)).toList();
       });
     } on ApiException catch (e) {
@@ -99,7 +102,7 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
                 TextField(controller: email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Email (optional)', prefixIcon: Icon(Icons.email_outlined))),
                 if (dialogError != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(dialogError!, style: const TextStyle(color: Colors.red))),
                 const SizedBox(height: 10),
-                Text('No payment is taken in this demo stage. The agency will confirm live availability and fare before ticketing.', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                Text(inventoryMode == 'duffel_test' ? 'Duffel Test Mode is active. No live order or money movement will happen yet.' : 'The agency will confirm availability and fare before ticketing.', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
               ]),
             ),
           ),
@@ -163,7 +166,7 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
         child: SingleChildScrollView(
           child: Column(children: [
             _topBar(mobile), _hero(mobile), _trustStrip(),
-            if (offers.isNotEmpty || error != null || loading) _resultsSection(mobile),
+            if (searched || error != null || loading) _resultsSection(mobile),
             _services(mobile), _footer(),
           ]),
         ),
@@ -294,15 +297,15 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             const Expanded(child: Text('Flight options', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900))),
-            if (inventoryMode == 'demo')
+            if (inventoryMode == 'duffel_test')
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(color: const Color(0xFFFFF7ED), borderRadius: BorderRadius.circular(99)),
-                child: const Text('DEMO FARES', style: TextStyle(color: Color(0xFFC2410C), fontWeight: FontWeight.w900, fontSize: 11)),
+                child: const Text('DUFFEL TEST MODE', style: TextStyle(color: Color(0xFFC2410C), fontWeight: FontWeight.w900, fontSize: 11)),
               ),
           ]),
           const SizedBox(height: 6),
-          Text(inventoryMode == 'demo' ? 'Test fares are shown while the live GDS/NDC airline connection is being prepared.' : 'Choose the option that works for your trip.', style: TextStyle(color: Colors.grey.shade600)),
+          Text(inventoryMode == 'duffel_test' ? (providerNotice.isEmpty ? 'Duffel test inventory is active. No live orders or money movement.' : providerNotice) : 'Choose the option that works for your trip.', style: TextStyle(color: Colors.grey.shade600)),
           if (error != null)
             Container(
               margin: const EdgeInsets.only(top: 18), padding: const EdgeInsets.all(16),
@@ -310,6 +313,13 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
               child: Row(children: [const Icon(Icons.error_outline, color: Colors.red), const SizedBox(width: 10), Expanded(child: Text(error!))]),
             ),
           const SizedBox(height: 18),
+          if (!loading && error == null && offers.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(22),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: const Color(0xFFE5E7EB))),
+              child: const Text('No flight offers were returned for this route/date in the current test inventory. Try another route or date.'),
+            ),
           for (final offer in offers) ...[_offerSummary(offer), const SizedBox(height: 14)],
         ]),
       ),
