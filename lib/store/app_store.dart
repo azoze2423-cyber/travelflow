@@ -8,6 +8,7 @@ class AppStore extends ChangeNotifier {
   final List<Customer> customers = [];
   final List<Booking> bookings = [];
   final List<Payment> payments = [];
+  final List<Invoice> invoices = [];
   final List<VisaCase> visas = [];
   final List<Supplier> suppliers = [];
   final List<UserAccount> users = [];
@@ -59,7 +60,7 @@ class AppStore extends ChangeNotifier {
   Future<void> logout() async {
     await api.clearToken();
     isAuthenticated = false;
-    customers.clear(); bookings.clear(); payments.clear(); visas.clear(); suppliers.clear(); users.clear();
+    customers.clear(); bookings.clear(); payments.clear(); invoices.clear(); visas.clear(); suppliers.clear(); users.clear();
     notifyListeners();
   }
 
@@ -78,6 +79,7 @@ class AppStore extends ChangeNotifier {
     customers..clear()..addAll((data['customers'] as List? ?? []).map((e) => Customer.fromJson(Map<String, dynamic>.from(e))));
     bookings..clear()..addAll((data['bookings'] as List? ?? []).map((e) => Booking.fromJson(Map<String, dynamic>.from(e))));
     payments..clear()..addAll((data['payments'] as List? ?? []).map((e) => Payment.fromJson(Map<String, dynamic>.from(e))));
+    invoices..clear()..addAll((data['invoices'] as List? ?? []).map((e) => Invoice.fromJson(Map<String, dynamic>.from(e))));
     visas..clear()..addAll((data['visas'] as List? ?? []).map((e) => VisaCase.fromJson(Map<String, dynamic>.from(e))));
     suppliers..clear()..addAll((data['suppliers'] as List? ?? []).map((e) => Supplier.fromJson(Map<String, dynamic>.from(e))));
     users..clear()..addAll((data['users'] as List? ?? []).map((e) => UserAccount.fromJson(Map<String, dynamic>.from(e))));
@@ -100,10 +102,14 @@ class AppStore extends ChangeNotifier {
 
   Future<void> addBooking(Booking b) async { final x=Booking.fromJson(Map<String,dynamic>.from(await api.post('/bookings',b.toJson()))); bookings.add(x); notifyListeners(); }
   Future<void> updateBooking(Booking b) async { final x=Booking.fromJson(Map<String,dynamic>.from(await api.put('/bookings/${b.id}',b.toJson()))); final i=bookings.indexWhere((e)=>e.id==b.id); if(i>=0) bookings[i]=x; notifyListeners(); }
-  Future<void> deleteBooking(String id) async { await api.delete('/bookings/$id'); bookings.removeWhere((e)=>e.id==id); payments.removeWhere((e)=>e.bookingId==id); notifyListeners(); }
+  Future<void> deleteBooking(String id) async { await api.delete('/bookings/$id'); bookings.removeWhere((e)=>e.id==id); payments.removeWhere((e)=>e.bookingId==id); invoices.removeWhere((e)=>e.bookingId==id); notifyListeners(); }
 
   Future<void> addPayment(Payment p) async { final x=Payment.fromJson(Map<String,dynamic>.from(await api.post('/payments',p.toJson()))); payments.add(x); notifyListeners(); }
   Future<void> deletePayment(String id) async { await api.delete('/payments/$id'); payments.removeWhere((e)=>e.id==id); notifyListeners(); }
+
+  Future<void> addInvoice(Invoice invoice) async { final x=Invoice.fromJson(Map<String,dynamic>.from(await api.post('/invoices',invoice.toJson()))); invoices.add(x); notifyListeners(); }
+  Future<void> updateInvoice(Invoice invoice) async { final x=Invoice.fromJson(Map<String,dynamic>.from(await api.put('/invoices/${invoice.id}',invoice.toJson()))); final i=invoices.indexWhere((e)=>e.id==invoice.id); if(i>=0) invoices[i]=x; notifyListeners(); }
+  Future<void> deleteInvoice(String id) async { await api.delete('/invoices/$id'); invoices.removeWhere((e)=>e.id==id); notifyListeners(); }
 
   Future<void> addVisa(VisaCase v) async { final x=VisaCase.fromJson(Map<String,dynamic>.from(await api.post('/visas',v.toJson()))); visas.add(x); notifyListeners(); }
   Future<void> updateVisa(VisaCase v) async { final x=VisaCase.fromJson(Map<String,dynamic>.from(await api.put('/visas/${v.id}',v.toJson()))); final i=visas.indexWhere((e)=>e.id==v.id); if(i>=0) visas[i]=x; notifyListeners(); }
