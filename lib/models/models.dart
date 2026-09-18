@@ -132,6 +132,51 @@ class Payment {
       );
 }
 
+
+class Invoice {
+  Invoice({
+    required this.id,
+    required this.bookingId,
+    required this.number,
+    required this.issueDate,
+    required this.dueDate,
+    required this.amount,
+    required this.status,
+    required this.notes,
+  });
+
+  String id;
+  String bookingId;
+  String number;
+  String issueDate;
+  String dueDate;
+  double amount;
+  String status;
+  String notes;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'bookingId': bookingId,
+        'number': number,
+        'issueDate': issueDate,
+        'dueDate': dueDate,
+        'amount': amount,
+        'status': status,
+        'notes': notes,
+      };
+
+  factory Invoice.fromJson(Map<String, dynamic> j) => Invoice(
+        id: j['id'] ?? '',
+        bookingId: j['bookingId'] ?? '',
+        number: j['number'] ?? '',
+        issueDate: j['issueDate'] ?? '',
+        dueDate: j['dueDate'] ?? '',
+        amount: (j['amount'] ?? 0).toDouble(),
+        status: j['status'] ?? 'Issued',
+        notes: j['notes'] ?? '',
+      );
+}
+
 class VisaCase {
   VisaCase({
     required this.id,
