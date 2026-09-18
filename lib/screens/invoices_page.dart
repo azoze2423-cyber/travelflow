@@ -1,4 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
 import '../store/app_store.dart';
 import '../widgets/common.dart';
@@ -37,7 +43,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
     return Column(children: [
       PageHeader(
         title: 'Invoices',
-        subtitle: 'Create and track customer invoices',
+        subtitle: 'Create, print and share customer invoices',
         action: FilledButton.icon(
           onPressed: widget.store.bookings.isEmpty ? null : () => _edit(),
           icon: const Icon(Icons.add),
@@ -89,8 +95,10 @@ class _InvoicesPageState extends State<InvoicesPage> {
                       ),
                       isThreeLine: true,
                       trailing: Wrap(children: [
-                        IconButton(onPressed: () => _view(invoice), icon: const Icon(Icons.visibility_outlined)),
-                        IconButton(onPressed: () => _edit(invoice), icon: const Icon(Icons.edit_outlined)),
+                        IconButton(tooltip: 'View invoice', onPressed: () => _view(invoice), icon: const Icon(Icons.visibility_outlined)),
+                        IconButton(tooltip: 'Print / PDF', onPressed: () => _printInvoice(invoice), icon: const Icon(Icons.print_outlined)),
+                        IconButton(tooltip: 'Send to WhatsApp', onPressed: () => _sendWhatsApp(invoice), icon: const Icon(Icons.chat_outlined, color: Color(0xFF16A34A))),
+                        IconButton(tooltip: 'Edit', onPressed: () => _edit(invoice), icon: const Icon(Icons.edit_outlined)),
                         IconButton(onPressed: () => _delete(invoice), icon: const Icon(Icons.delete_outline, color: Colors.red)),
                       ]),
                     );
@@ -99,6 +107,174 @@ class _InvoicesPageState extends State<InvoicesPage> {
         ),
       ),
     ]);
+  }
+
+  Future<Uint8List> _buildInvoicePdf(Invoice invoice) async {
+    final booking = widget.store.bookingById(invoice.bookingId);
+    final customer = booking == null ? null : widget.store.customerById(booking.customerId);
+    final paid = widget.store.paidForBooking(invoice.bookingId);
+    final balance = invoice.amount - paid;
+
+    final regular = await PdfGoogleFonts.notoSansArabicRegular();
+    final bold = await PdfGoogleFonts.notoSansArabicBold();
+    final document = pw.Document();
+
+    pw.Widget detail(String label, String value, {bool emphasize = false}) {
+      return pw.Padding(
+        padding: const pw.EdgeInsets.symmetric(vertical: 4),
+        child: pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.SizedBox(
+              width: 125,
+              child: pw.Text(label, style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+            ),
+            pw.Expanded(
+              child: pw.Text(
+                value,
+                style: emphasize ? pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12) : null,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    document.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(36),
+        theme: pw.ThemeData.withFont(base: regular, bold: bold),
+        build: (_) => [
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Expanded(
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(widget.store.agencyName, style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold)),
+                    if (widget.store.address.isNotEmpty) pw.Text(widget.store.address),
+                    if (widget.store.phone.isNotEmpty) pw.Text(widget.store.phone),
+                  ],
+                ),
+              ),
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.end,
+                children: [
+                  pw.Text('INVOICE', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+                  pw.Text(invoice.number),
+                  pw.Text(paymentStatus(invoice)),
+                ],
+              ),
+            ],
+          ),
+          pw.SizedBox(height: 20),
+          pw.Divider(),
+          pw.SizedBox(height: 8),
+          detail('Customer', customer?.name ?? 'Unknown customer'),
+          if ((customer?.phone ?? '').isNotEmpty) detail('Phone', customer!.phone),
+          if ((customer?.email ?? '').isNotEmpty) detail('Email', customer!.email),
+          detail('Service', (booking?.type ?? '') + ((booking?.destination ?? '').isEmpty ? '' : ' — ' + booking!.destination)),
+          detail('Booking reference', booking?.reference ?? ''),
+          detail('Travel date', booking?.travelDate ?? ''),
+          detail('Issue date', invoice.issueDate),
+          detail('Due date', invoice.dueDate),
+          pw.SizedBox(height: 14),
+          pw.Container(
+            padding: const pw.EdgeInsets.all(14),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.grey100,
+              border: pw.Border.all(color: PdfColors.grey300),
+              borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
+            ),
+            child: pw.Column(
+              children: [
+                detail('Invoice amount', money(invoice.amount, widget.store.currency), emphasize: true),
+                detail('Paid', money(paid, widget.store.currency)),
+                detail('Balance', money(balance, widget.store.currency), emphasize: true),
+              ],
+            ),
+          ),
+          if (invoice.notes.isNotEmpty) ...[
+            pw.SizedBox(height: 18),
+            pw.Text('Notes', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+            pw.SizedBox(height: 4),
+            pw.Text(invoice.notes),
+          ],
+          pw.SizedBox(height: 30),
+          pw.Divider(),
+          pw.Text('Thank you for choosing ' + widget.store.agencyName + '.', style: const pw.TextStyle(fontSize: 10)),
+        ],
+      ),
+    );
+
+    return document.save();
+  }
+
+  Future<void> _printInvoice(Invoice invoice) async {
+    try {
+      await Printing.layoutPdf(
+        name: invoice.number.isEmpty ? 'TravelFlow Invoice' : invoice.number,
+        onLayout: (_) => _buildInvoicePdf(invoice),
+      );
+    } catch (e) {
+      _showMessage('Could not open print/PDF: $e');
+    }
+  }
+
+  Future<void> _sharePdf(Invoice invoice) async {
+    try {
+      final bytes = await _buildInvoicePdf(invoice);
+      final safeName = invoice.number.isEmpty
+          ? 'invoice'
+          : invoice.number.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+      await Printing.sharePdf(bytes: bytes, filename: '$safeName.pdf');
+    } catch (e) {
+      _showMessage('Could not share PDF: $e');
+    }
+  }
+
+  Future<void> _sendWhatsApp(Invoice invoice) async {
+    final booking = widget.store.bookingById(invoice.bookingId);
+    final customer = booking == null ? null : widget.store.customerById(booking.customerId);
+    final paid = widget.store.paidForBooking(invoice.bookingId);
+    final balance = invoice.amount - paid;
+    final phone = (customer?.phone ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+
+    if (phone.isEmpty) {
+      _showMessage('Add the customer phone number first, then try WhatsApp again.');
+      return;
+    }
+
+    final message = [
+      widget.store.agencyName,
+      'Invoice ${invoice.number}',
+      'Customer: ${customer?.name ?? ''}',
+      if ((booking?.type ?? '').isNotEmpty)
+        'Service: ${booking!.type}${booking.destination.isEmpty ? '' : ' - ${booking.destination}'}',
+      if ((booking?.reference ?? '').isNotEmpty) 'Booking ref: ${booking!.reference}',
+      'Invoice amount: ${money(invoice.amount, widget.store.currency)}',
+      'Paid: ${money(paid, widget.store.currency)}',
+      'Balance: ${money(balance, widget.store.currency)}',
+      if (invoice.dueDate.isNotEmpty) 'Due date: ${invoice.dueDate}',
+      '',
+      'Thank you.',
+    ].join('\n');
+
+    final uri = Uri.https('wa.me', phone, {'text': message});
+    try {
+      final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!opened) _showMessage('Could not open WhatsApp.');
+    } catch (e) {
+      _showMessage('Could not open WhatsApp: $e');
+    }
+  }
+
+  void _showMessage(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
   Future<void> _view(Invoice invoice) async {
@@ -135,7 +311,24 @@ class _InvoicesPageState extends State<InvoicesPage> {
             ],
           ),
         ),
-        actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+        actions: [
+          TextButton.icon(
+            onPressed: () => _sendWhatsApp(invoice),
+            icon: const Icon(Icons.chat_outlined),
+            label: const Text('WhatsApp'),
+          ),
+          TextButton.icon(
+            onPressed: () => _sharePdf(invoice),
+            icon: const Icon(Icons.share_outlined),
+            label: const Text('Share PDF'),
+          ),
+          FilledButton.icon(
+            onPressed: () => _printInvoice(invoice),
+            icon: const Icon(Icons.print_outlined),
+            label: const Text('Print / PDF'),
+          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        ],
       ),
     );
   }
