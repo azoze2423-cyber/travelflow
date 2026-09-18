@@ -1,0 +1,14 @@
+﻿.env
+backend/.env
+backend/.venv/
+.venv/
+__pycache__/
+*.pyc
+build/
+.dart_tool/
+.idea/
+
+backup-before-*/
+backend/data/
+.flutter-plugins-dependencies
+*.iml

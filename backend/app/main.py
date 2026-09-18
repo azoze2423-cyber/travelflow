@@ -1,0 +1,187 @@
+from contextlib import asynccontextmanager
+from uuid import uuid4
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+from .auth import admin_user, create_token, current_user, hash_password, verify_password
+from .config import settings
+from .database import Base, SessionLocal, engine, get_db
+from .db_models import Agency, Booking, Customer, Payment, Supplier, User, VisaCase
+from .schemas import AccountIn, BookingIn, CustomerIn, LoginIn, PaymentIn, SettingsIn, SupplierIn, UserIn, VisaIn
+
+
+def uid(prefix: str) -> str:
+    return f"{prefix}_{uuid4().hex[:16]}"
+
+def customer_json(x): return {"id":x.id,"name":x.name,"phone":x.phone,"email":x.email,"nationality":x.nationality,"passportNumber":x.passport_number,"passportExpiry":x.passport_expiry,"notes":x.notes}
+def booking_json(x): return {"id":x.id,"customerId":x.customer_id,"type":x.type,"destination":x.destination,"travelDate":x.travel_date,"status":x.status,"cost":x.cost,"salePrice":x.sale_price,"reference":x.reference,"notes":x.notes}
+def payment_json(x): return {"id":x.id,"bookingId":x.booking_id,"amount":x.amount,"method":x.method,"date":x.date,"notes":x.notes}
+def visa_json(x): return {"id":x.id,"customerId":x.customer_id,"country":x.country,"visaType":x.visa_type,"status":x.status,"applicationDate":x.application_date,"expiryDate":x.expiry_date,"fee":x.fee,"notes":x.notes}
+def supplier_json(x): return {"id":x.id,"name":x.name,"type":x.type,"phone":x.phone,"email":x.email,"contactPerson":x.contact_person,"notes":x.notes}
+def user_json(x): return {"id":x.id,"name":x.name,"email":x.email,"role":x.role,"active":x.active}
+def agency_json(x): return {"id":x.id,"name":x.name,"currency":x.currency,"phone":x.phone,"address":x.address}
+
+def seed_database():
+    Base.metadata.create_all(engine)
+    with SessionLocal() as db:
+        existing = db.scalar(select(Agency).limit(1))
+        if existing:
+            return
+        agency = Agency(id=uid("agency"), name=settings.agency_name, currency=settings.currency, phone="+971 50 000 0000", address="United Arab Emirates")
+        admin = User(id=uid("user"), agency_id=agency.id, name="Administrator", email=settings.admin_email.lower(), password_hash=hash_password(settings.admin_password), role="admin")
+        db.add_all([agency, admin]); db.flush()
+        if settings.seed_demo:
+            c1=Customer(id="c1",agency_id=agency.id,name="Ahmed Ali",phone="+971501112233",email="ahmed@example.com",nationality="Sudanese",passport_number="P1234567",passport_expiry="2028-05-20",notes="Prefers WhatsApp")
+            c2=Customer(id="c2",agency_id=agency.id,name="Sara Omar",phone="+971502223344",email="sara@example.com",nationality="Egyptian",passport_number="A7654321",passport_expiry="2027-11-10",notes="Family booking")
+            c3=Customer(id="c3",agency_id=agency.id,name="Mohammed Hassan",phone="+971503334455",email="mohammed@example.com",nationality="Emirati",passport_number="UAE778899",passport_expiry="2029-03-15",notes="Corporate client")
+            db.add_all([c1,c2,c3]); db.flush()
+            db.add_all([
+                Booking(id="b1",agency_id=agency.id,customer_id="c1",type="Flight",destination="Istanbul",travel_date="2026-10-02",status="Confirmed",cost=1450,sale_price=1750,reference="TK-88321",notes=""),
+                Booking(id="b2",agency_id=agency.id,customer_id="c2",type="Hotel",destination="Dubai",travel_date="2026-09-25",status="Processing",cost=900,sale_price=1250,reference="HT-1045",notes="3 nights"),
+                Booking(id="b3",agency_id=agency.id,customer_id="c3",type="Package",destination="Baku",travel_date="2026-10-10",status="New",cost=3200,sale_price=4100,reference="PK-2201",notes="2 adults"),
+                Payment(id="p1",agency_id=agency.id,booking_id="b1",amount=1750,method="Card",date="2026-09-15",notes="Paid in full"),
+                Payment(id="p2",agency_id=agency.id,booking_id="b2",amount=500,method="Cash",date="2026-09-16",notes="Deposit"),
+                VisaCase(id="v1",agency_id=agency.id,customer_id="c1",country="Turkey",visa_type="Tourist",status="Approved",application_date="2026-09-01",expiry_date="2026-12-01",fee=350,notes="E-visa"),
+                Supplier(id="s1",agency_id=agency.id,name="Global Air Partner",type="Airline",phone="+97140000001",email="sales@airpartner.test",contact_person="Mona",notes=""),
+                Supplier(id="s2",agency_id=agency.id,name="City Hotels Network",type="Hotel",phone="+97140000002",email="booking@cityhotels.test",contact_person="Karim",notes=""),
+            ])
+        db.commit()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    seed_database()
+    yield
+
+app = FastAPI(title="TravelFlow API", version="2.0.0", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins, allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
+
+@app.get("/health")
+def health(): return {"ok": True, "service": "travelflow-api"}
+
+@app.post("/auth/login")
+def login(data: LoginIn, db: Session = Depends(get_db)):
+    user = db.scalar(select(User).where(User.email == data.email.lower()))
+    if not user or not user.active or not verify_password(data.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+    return {"accessToken": create_token(user.id), "user": user_json(user)}
+
+@app.get("/bootstrap")
+def bootstrap(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    aid=user.agency_id; agency=db.get(Agency,aid)
+    return {
+        "agency": agency_json(agency), "user": user_json(user),
+        "customers": [customer_json(x) for x in db.scalars(select(Customer).where(Customer.agency_id==aid)).all()],
+        "bookings": [booking_json(x) for x in db.scalars(select(Booking).where(Booking.agency_id==aid)).all()],
+        "payments": [payment_json(x) for x in db.scalars(select(Payment).where(Payment.agency_id==aid)).all()],
+        "visas": [visa_json(x) for x in db.scalars(select(VisaCase).where(VisaCase.agency_id==aid)).all()],
+        "suppliers": [supplier_json(x) for x in db.scalars(select(Supplier).where(Supplier.agency_id==aid)).all()],
+        "users": [user_json(x) for x in db.scalars(select(User).where(User.agency_id==aid)).all()] if user.role=="admin" else [],
+    }
+
+@app.post("/customers")
+def add_customer(data: CustomerIn, user: User=Depends(current_user), db: Session=Depends(get_db)):
+    x=Customer(id=data.id or uid("c"),agency_id=user.agency_id,name=data.name,phone=data.phone,email=data.email,nationality=data.nationality,passport_number=data.passportNumber,passport_expiry=data.passportExpiry,notes=data.notes); db.add(x); db.commit(); db.refresh(x); return customer_json(x)
+@app.put("/customers/{item_id}")
+def update_customer(item_id:str,data:CustomerIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    x=db.get(Customer,item_id)
+    if not x or x.agency_id!=user.agency_id: raise HTTPException(404,"Customer not found")
+    x.name=data.name;x.phone=data.phone;x.email=data.email;x.nationality=data.nationality;x.passport_number=data.passportNumber;x.passport_expiry=data.passportExpiry;x.notes=data.notes;db.commit();return customer_json(x)
+@app.delete("/customers/{item_id}")
+def delete_customer(item_id:str,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    x=db.get(Customer,item_id)
+    if not x or x.agency_id!=user.agency_id: raise HTTPException(404,"Customer not found")
+    if db.scalar(select(Booking.id).where(Booking.customer_id==item_id).limit(1)): raise HTTPException(409,"Customer has bookings and cannot be deleted")
+    db.delete(x);db.commit();return {"ok":True}
+
+@app.post("/bookings")
+def add_booking(data:BookingIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    c=db.get(Customer,data.customerId)
+    if not c or c.agency_id!=user.agency_id: raise HTTPException(400,"Invalid customer")
+    x=Booking(id=data.id or uid("b"),agency_id=user.agency_id,customer_id=data.customerId,type=data.type,destination=data.destination,travel_date=data.travelDate,status=data.status,cost=data.cost,sale_price=data.salePrice,reference=data.reference,notes=data.notes);db.add(x);db.commit();db.refresh(x);return booking_json(x)
+@app.put("/bookings/{item_id}")
+def update_booking(item_id:str,data:BookingIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    x=db.get(Booking,item_id)
+    if not x or x.agency_id!=user.agency_id: raise HTTPException(404,"Booking not found")
+    c=db.get(Customer,data.customerId)
+    if not c or c.agency_id!=user.agency_id: raise HTTPException(400,"Invalid customer")
+    x.customer_id=data.customerId;x.type=data.type;x.destination=data.destination;x.travel_date=data.travelDate;x.status=data.status;x.cost=data.cost;x.sale_price=data.salePrice;x.reference=data.reference;x.notes=data.notes;db.commit();return booking_json(x)
+@app.delete("/bookings/{item_id}")
+def delete_booking(item_id:str,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    x=db.get(Booking,item_id)
+    if not x or x.agency_id!=user.agency_id: raise HTTPException(404,"Booking not found")
+    for p in db.scalars(select(Payment).where(Payment.booking_id==item_id)).all(): db.delete(p)
+    db.delete(x);db.commit();return {"ok":True}
+
+@app.post("/payments")
+def add_payment(data:PaymentIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    b=db.get(Booking,data.bookingId)
+    if not b or b.agency_id!=user.agency_id: raise HTTPException(400,"Invalid booking")
+    x=Payment(id=data.id or uid("p"),agency_id=user.agency_id,booking_id=data.bookingId,amount=data.amount,method=data.method,date=data.date,notes=data.notes);db.add(x);db.commit();db.refresh(x);return payment_json(x)
+@app.delete("/payments/{item_id}")
+def delete_payment(item_id:str,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    x=db.get(Payment,item_id)
+    if not x or x.agency_id!=user.agency_id: raise HTTPException(404,"Payment not found")
+    db.delete(x);db.commit();return {"ok":True}
+
+@app.post("/visas")
+def add_visa(data:VisaIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    c=db.get(Customer,data.customerId)
+    if not c or c.agency_id!=user.agency_id: raise HTTPException(400,"Invalid customer")
+    x=VisaCase(id=data.id or uid("v"),agency_id=user.agency_id,customer_id=data.customerId,country=data.country,visa_type=data.visaType,status=data.status,application_date=data.applicationDate,expiry_date=data.expiryDate,fee=data.fee,notes=data.notes);db.add(x);db.commit();db.refresh(x);return visa_json(x)
+@app.put("/visas/{item_id}")
+def update_visa(item_id:str,data:VisaIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    x=db.get(VisaCase,item_id)
+    if not x or x.agency_id!=user.agency_id: raise HTTPException(404,"Visa case not found")
+    c=db.get(Customer,data.customerId)
+    if not c or c.agency_id!=user.agency_id: raise HTTPException(400,"Invalid customer")
+    x.customer_id=data.customerId;x.country=data.country;x.visa_type=data.visaType;x.status=data.status;x.application_date=data.applicationDate;x.expiry_date=data.expiryDate;x.fee=data.fee;x.notes=data.notes;db.commit();return visa_json(x)
+@app.delete("/visas/{item_id}")
+def delete_visa(item_id:str,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    x=db.get(VisaCase,item_id)
+    if not x or x.agency_id!=user.agency_id: raise HTTPException(404,"Visa case not found")
+    db.delete(x);db.commit();return {"ok":True}
+
+@app.post("/suppliers")
+def add_supplier(data:SupplierIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    x=Supplier(id=data.id or uid("s"),agency_id=user.agency_id,name=data.name,type=data.type,phone=data.phone,email=data.email,contact_person=data.contactPerson,notes=data.notes);db.add(x);db.commit();db.refresh(x);return supplier_json(x)
+@app.put("/suppliers/{item_id}")
+def update_supplier(item_id:str,data:SupplierIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    x=db.get(Supplier,item_id)
+    if not x or x.agency_id!=user.agency_id: raise HTTPException(404,"Supplier not found")
+    x.name=data.name;x.type=data.type;x.phone=data.phone;x.email=data.email;x.contact_person=data.contactPerson;x.notes=data.notes;db.commit();return supplier_json(x)
+@app.delete("/suppliers/{item_id}")
+def delete_supplier(item_id:str,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    x=db.get(Supplier,item_id)
+    if not x or x.agency_id!=user.agency_id: raise HTTPException(404,"Supplier not found")
+    db.delete(x);db.commit();return {"ok":True}
+
+@app.put("/settings")
+def update_settings(data:SettingsIn,user:User=Depends(admin_user),db:Session=Depends(get_db)):
+    a=db.get(Agency,user.agency_id);a.name=data.name;a.currency=data.currency;a.phone=data.phone;a.address=data.address;db.commit();return agency_json(a)
+@app.put("/account")
+def update_account(data:AccountIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    if data.name is not None and data.name.strip(): user.name=data.name.strip()
+    if data.email is not None and data.email.strip() and data.email.lower()!=user.email:
+        if db.scalar(select(User).where(User.email==data.email.lower())): raise HTTPException(409,"Email already in use")
+        user.email=data.email.lower()
+    if data.password is not None and data.password:
+        if len(data.password)<6: raise HTTPException(400,"Password must contain at least 6 characters")
+        user.password_hash=hash_password(data.password)
+    db.commit();return user_json(user)
+
+@app.get("/users")
+def list_users(user:User=Depends(admin_user),db:Session=Depends(get_db)):
+    return [user_json(x) for x in db.scalars(select(User).where(User.agency_id==user.agency_id)).all()]
+@app.post("/users")
+def add_user(data:UserIn,user:User=Depends(admin_user),db:Session=Depends(get_db)):
+    if data.role not in {"admin","staff"}: raise HTTPException(400,"Role must be admin or staff")
+    if db.scalar(select(User).where(User.email==data.email.lower())): raise HTTPException(409,"Email already in use")
+    if len(data.password)<6: raise HTTPException(400,"Password must contain at least 6 characters")
+    x=User(id=uid("user"),agency_id=user.agency_id,name=data.name,email=data.email.lower(),password_hash=hash_password(data.password),role=data.role,active=True);db.add(x);db.commit();db.refresh(x);return user_json(x)
+@app.delete("/users/{item_id}")
+def delete_user(item_id:str,user:User=Depends(admin_user),db:Session=Depends(get_db)):
+    if item_id==user.id: raise HTTPException(400,"You cannot delete your own account")
+    x=db.get(User,item_id)
+    if not x or x.agency_id!=user.agency_id: raise HTTPException(404,"User not found")
+    db.delete(x);db.commit();return {"ok":True}
