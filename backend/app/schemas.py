@@ -70,6 +70,19 @@ class FlightSearchIn(BaseModel):
     travelDate: str
     adults: int = 1
 
+class FlightPassengerIn(BaseModel):
+    title: str
+    gender: str
+    givenName: str
+    familyName: str
+    bornOn: str
+    email: str
+    phoneNumber: str
+
+class FlightOrderIn(BaseModel):
+    offerId: str
+    passengers: list[FlightPassengerIn]
+
 class PortalRequestIn(BaseModel):
     offerId: str
     airline: str
